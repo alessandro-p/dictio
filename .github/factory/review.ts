@@ -140,25 +140,39 @@ const fill = (template: string, values: Record<string, string>): string =>
 
 // Read-only: files, four git commands that only read history, and sub-agents
 // with the same limits. Anything else is denied without asking.
+// Flags: https://code.claude.com/docs/en/cli-reference
 const claudeArgs = (schema: string, readDir: string): string[] => [
+  // Run once, non-interactively, and exit (headless mode).
+  // https://code.claude.com/docs/en/headless
   "--print",
+  // No command-running tools unless named in --tools; file tools stay inside
+  // the working directories; settings files in the checkout are ignored.
   "--restricted",
+  // No MCP servers, not even ones a .mcp.json in the checkout configures.
   "--strict-mcp-config",
+  // The only tools that exist: reading files, the shell, and sub-agents.
   "--tools",
   "Read,Glob,Grep,Bash,Agent",
+  // Shell commands that run without asking: git commands that read history.
   "--allowedTools",
   "Bash(git diff:*)",
   "Bash(git log:*)",
   "Bash(git rev-parse:*)",
   "Bash(git show:*)",
+  // Denied outright, even if a setting allowed them.
   "--disallowedTools",
   "Edit,Write,NotebookEdit",
+  // Deny anything that isn't allowed above instead of waiting for a person.
+  // https://code.claude.com/docs/en/permission-modes
   "--permission-mode",
   "dontAsk",
+  // One more directory it may read: the one holding the ticket.
   "--add-dir",
   readDir,
+  // Print one JSON object with the run's result and metadata.
   "--output-format",
   "json",
+  // Make the answer match this schema; it arrives in `structured_output`.
   "--json-schema",
   schema,
 ];
@@ -187,6 +201,8 @@ const main = (): void => {
     input: prompt,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    // Strip credentials (the Claude token) from the shell commands it runs.
+    // https://code.claude.com/docs/en/env-vars
     env: { ...process.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
   });
   if (claude.status !== 0) {
