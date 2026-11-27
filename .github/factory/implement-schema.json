@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["prBody"],
+  "properties": {
+    "prBody": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The pull request description, in Markdown: what the ticket asked for, what you built, what you deliberately left out."
+    }
+  }
+}
