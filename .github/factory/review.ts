@@ -1,6 +1,7 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fill, required, runClaude } from "./claude.ts";
 
 // These types mirror review-schema.json, which the agent's answer is validated
 // against. Change one, change the other.
@@ -125,19 +126,6 @@ export const renderReview = (
   return { body: `${body}\n`, comments };
 };
 
-const required = (name: string): string => {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing env var ${name}.`);
-  return value;
-};
-
-const fill = (template: string, values: Record<string, string>): string =>
-  template.replace(/\{\{(\w+)\}\}/g, (placeholder, name: string) => {
-    const value = values[name];
-    if (value === undefined) throw new Error(`No value for ${placeholder}.`);
-    return value;
-  });
-
 // Read-only: files, four git commands that only read history, and sub-agents
 // with the same limits. Anything else is denied without asking.
 // Flags: https://code.claude.com/docs/en/cli-reference
@@ -196,27 +184,11 @@ const main = (): void => {
     "utf8",
   );
 
-  const claude = spawnSync("claude", claudeArgs(schema, join(ticket, "..")), {
-    input: prompt,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    // Strip credentials (the Claude token) from the shell commands it runs.
-    // https://code.claude.com/docs/en/env-vars
-    env: { ...process.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
-  });
-  if (claude.status !== 0) {
-    throw new Error(`claude exited with ${claude.status}: ${claude.stderr}`);
-  }
-  const result = JSON.parse(claude.stdout);
-  console.log(
-    JSON.stringify({ subtype: result.subtype, turns: result.num_turns }),
-  );
-  for (const denial of result.permission_denials ?? []) {
-    console.log(`Denied: ${JSON.stringify(denial.tool_input)}`);
-  }
-  // `--json-schema` made the CLI validate structured_output against the schema.
-  const output: ReviewOutput | undefined = result.structured_output;
-  if (!output) throw new Error(`No structured output (${result.subtype}).`);
+  // `--json-schema` made the CLI validate the output against the schema.
+  const output = runClaude(
+    claudeArgs(schema, join(ticket, "..")),
+    prompt,
+  ) as ReviewOutput;
 
   const diff = execFileSync("git", ["diff", `origin/${baseRef}...HEAD`], {
     encoding: "utf8",

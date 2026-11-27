@@ -1,0 +1,261 @@
+name: Agent implement
+
+# Someone puts the `agent:implement` label on an issue.
+#
+# The agent can run any code, and a hosted runner gives that code sudo, so it
+# can read every secret its job holds. Each job runs on a fresh machine with
+# only the secrets it names: `build`, the agent's, holds only the Claude token,
+# and FACTORY_PAT exists only in `publish`, which runs nothing the agent wrote.
+#
+# Issues can't come from a fork. Never move this onto `pull_request_target`,
+# which runs fork code with secrets.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+# Every label fires this workflow; only `agent:implement` shares a group, so
+# labelling an issue under build with anything else queues nothing.
+concurrency:
+  group: ${{ github.event.label.name == 'agent:implement' && format('agent-implement-{0}', github.event.issue.number) || format('ignore-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+env:
+  GH_REPO: ${{ github.repository }}
+  ISSUE: ${{ github.event.issue.number }}
+  # New on every run, so a retry never pushes onto an earlier run's branch.
+  BRANCH: agent/issue-${{ github.event.issue.number }}-${{ github.run_id }}
+  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+jobs:
+  start:
+    # Anyone can open an issue on a public repo: only build one opened by
+    # someone on the project.
+    if: >-
+      github.event.label.name == 'agent:implement' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Swap the trigger label for agent:in-progress
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Removed now, so adding it again is how you retry.
+        run: >-
+          gh issue edit "$ISSUE"
+          --remove-label agent:implement --remove-label agent:blocked
+          --add-label agent:in-progress
+
+  build:
+    needs: start
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      # No dependency cache: one saved here, after the agent ran, would land in
+      # main's scope, which every branch's runs read.
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+
+      # With scripts: `prepare` installs the pre-commit hook the agent commits
+      # through.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.332
+
+      - name: Fetch the ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TICKET: ${{ runner.temp }}/implement/ticket.md
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$TICKET")"
+          # "# #12: Title", the body, then each comment by someone on the
+          # project. The factory's comments come from github-actions[bot],
+          # which isn't, so they're left out.
+          gh issue view "$ISSUE" --json number,title,body,comments | jq -r '
+            "# #\(.number): \(.title)\n\n\(.body // "")"
+            + ([.comments[]
+                | select(.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR"))
+                | "\n\n## Comment by \(.author.login)\n\n\(.body)"] | join(""))
+          ' > "$TICKET"
+          cat "$TICKET"
+
+      - name: Open the branch
+        id: base
+        run: |
+          set -euo pipefail
+          git config user.name "agent-factory[bot]"
+          git config user.email "agent-factory[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # If husky didn't point git at the hook, the agent's commits would
+          # skip it without anyone noticing.
+          if [ "$(git config core.hooksPath)" != ".husky/_" ]; then
+            echo "::error::The pre-commit hook is not installed."
+            exit 1
+          fi
+
+      - name: Build the ticket
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TICKET: ${{ runner.temp }}/implement/ticket.md
+          PR_BODY: ${{ runner.temp }}/implement/pr-body.md
+        run: node .github/factory/implement.ts
+
+      - name: Check the agent committed everything
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-list --count "$BASE..HEAD")" -eq 0 ]; then
+            echo "::error::The agent committed nothing."
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::The agent left uncommitted changes."
+            git status --short
+            exit 1
+          fi
+          git log --oneline "$BASE..HEAD"
+
+      # The hook ran on each commit, but the agent could have skipped it.
+      - name: Checks
+        run: pnpm check
+
+      - name: Build
+        run: pnpm build
+
+      - name: Bundle the commits
+        env:
+          BASE: ${{ steps.base.outputs.sha }}
+        run: git bundle create "$RUNNER_TEMP/implement/commits.bundle" "$BASE..$BRANCH"
+
+      - name: Upload the commits and the pull request body
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: implement
+          path: |
+            ${{ runner.temp }}/implement/commits.bundle
+            ${{ runner.temp }}/implement/pr-body.md
+          if-no-files-found: error
+          retention-days: 1
+
+  # Everything that arrives from `build` is data: git objects and some text.
+  # Nothing here runs code from the repo.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.FACTORY_PAT }}
+    outputs:
+      pr: ${{ steps.pr.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the commits and the pull request body
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: implement
+          path: ${{ runner.temp }}/implement
+
+      - name: Fetch the commits
+        run: |
+          set -euo pipefail
+          git fetch "$RUNNER_TEMP/implement/commits.bundle" "$BRANCH:$BRANCH"
+          git log --oneline "$GITHUB_SHA..$BRANCH"
+
+      # FACTORY_PAT can't push workflow files, but could push the rest of
+      # .github/, the factory's own code among it.
+      - name: Refuse changes to .github/
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only "$GITHUB_SHA...$BRANCH" -- .github/)"
+          if [ -n "$changed" ]; then
+            echo "::error::The agent changed .github/:"
+            echo "$changed"
+            exit 1
+          fi
+
+      - name: Push
+        run: |
+          set -euo pipefail
+          # Make git ask gh for credentials, which hands it GH_TOKEN.
+          gh auth setup-git
+          git push origin "$BRANCH"
+
+      # Draft until the reviewer posts its verdict, which marks it ready.
+      - name: Open the draft pull request
+        id: pr
+        env:
+          TITLE: ${{ github.event.issue.title }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/implement/pr-body.md"
+          printf '\n\n---\n\nCloses #%s. Built by the implement workflow ([logs](%s)).\n' \
+            "$ISSUE" "$RUN_URL" >> "$body"
+          url="$(gh pr create --draft --base "$BASE_BRANCH" --head "$BRANCH" \
+            --title "$TITLE" --body-file "$body")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # With FACTORY_PAT, because a label added with GITHUB_TOKEN starts no
+      # workflow.
+      - name: Hand the pull request to the reviewer
+        env:
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: gh pr edit "$PR_URL" --add-label agent:review
+
+  report:
+    needs: [start, build, publish]
+    if: always() && needs.start.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Report back on the ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.publish.result }}
+          PR_URL: ${{ needs.publish.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if [ "$RESULT" = success ]; then
+            message="Opened $PR_URL and handed it to the reviewer."
+          else
+            gh issue edit "$ISSUE" --add-label agent:blocked
+            if [ -n "$PR_URL" ]; then
+              message="Opened $PR_URL but couldn't hand it to the reviewer. Add \`agent:review\` to it."
+            else
+              message="The run failed. Add \`agent:implement\` again to retry."
+            fi
+          fi
+          gh issue edit "$ISSUE" --remove-label agent:in-progress
+          gh issue comment "$ISSUE" --body "$message ([logs]($RUN_URL))"

@@ -28,8 +28,6 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       BASE_REF: ${{ github.event.pull_request.base.ref }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      TICKET: ${{ runner.temp }}/review/ticket.md
-      REVIEW_OUT: ${{ runner.temp }}/review.json
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
@@ -63,6 +61,7 @@ jobs:
       - name: Fetch the ticket
         env:
           GH_TOKEN: ${{ github.token }}
+          TICKET: ${{ runner.temp }}/review/ticket.md
         run: |
           set -euo pipefail
           mkdir -p "$(dirname "$TICKET")"
@@ -109,11 +108,14 @@ jobs:
       - name: Review
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          TICKET: ${{ runner.temp }}/review/ticket.md
+          REVIEW_OUT: ${{ runner.temp }}/review.json
         run: node .base/.github/factory/review.ts
 
       - name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEW_OUT: ${{ runner.temp }}/review.json
         # One review: the verdict as its body, the findings as line comments.
         run: |
           gh api --method POST "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" \
