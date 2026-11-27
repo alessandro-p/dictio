@@ -79,8 +79,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # --allow-scripts: npm skips install scripts unless allowed, and Claude
+      # Code's postinstall swaps its stub for the real binary.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.332
+        run: |
+          set -euo pipefail
+          npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.332
+          # Fail if another claude on PATH would run instead of the pinned one.
+          command -v claude
+          claude --version | grep -F "2.1.332"
 
       - name: Fetch the ticket
         env:
