@@ -26,9 +26,6 @@ export const runClaude = (args: string[], prompt: string): unknown => {
     input: prompt,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
-    // Strip credentials (the Claude token) from the shell commands it runs.
-    // https://code.claude.com/docs/en/env-vars
-    env: { ...process.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" },
   });
   if (claude.status !== 0) {
     throw new Error(`claude exited with ${claude.status}: ${claude.stderr}`);

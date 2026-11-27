@@ -15,28 +15,11 @@ const claudeArgs = (schema: string, readDir: string): string[] => [
   // Run once, non-interactively, and exit (headless mode).
   // https://code.claude.com/docs/en/headless
   "--print",
-  // No command-running tools unless named in --tools; file tools stay inside
-  // the working directories; settings files in the checkout are ignored.
-  "--restricted",
-  // No MCP servers, not even ones a .mcp.json in the checkout configures.
-  "--strict-mcp-config",
-  // The only tools that exist.
-  "--tools",
-  "Read,Glob,Grep,Edit,Write,Bash,Agent",
-  // What runs without asking. Every other call needs approval, and in print
-  // mode nobody can give it, so it's denied. pnpm runs any script, so the
-  // agent can run any code: the workflow gives this machine no secret but the
-  // Claude token. https://code.claude.com/docs/en/permissions
-  "--allowedTools",
-  "Edit",
-  "Write",
-  "Bash(pnpm *)",
-  "Bash(git add *)",
-  "Bash(git commit *)",
-  "Bash(git status *)",
-  "Bash(git diff *)",
-  "Bash(git log *)",
-  "Bash(git show *)",
+  // No permission checks, like the reference factory. An allowlist would not
+  // hold here: `pnpm exec` runs any program. The wall is the workflow's job
+  // split, which leaves this machine no secret but the Claude token.
+  // https://code.claude.com/docs/en/permission-modes
+  "--dangerously-skip-permissions",
   // One more directory it may read: the one holding the ticket.
   "--add-dir",
   readDir,
