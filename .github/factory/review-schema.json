@@ -1,0 +1,59 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["standards", "spec", "findings", "missingRules"],
+  "properties": {
+    "standards": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Standards axis in one or two sentences."
+    },
+    "spec": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Spec axis in one or two sentences, or why there is no spec."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Every finding from both axes, one per problem. Empty is fine.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["axis", "title", "path", "line", "body"],
+        "properties": {
+          "axis": {
+            "enum": ["standards", "spec"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The finding in a few words, plain text."
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The file, relative to the repository root."
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "A line in the file after the change, inside a diff hunk when possible."
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Markdown: the rule or spec line it breaks, what is wrong, what to do instead."
+          }
+        }
+      }
+    },
+    "missingRules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Anything you wanted to fail the change for that no standard covers."
+    }
+  }
+}

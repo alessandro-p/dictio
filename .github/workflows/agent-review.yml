@@ -1,0 +1,134 @@
+name: Agent review
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: write
+
+# Every label fires this workflow; only `agent:review` shares a group, so
+# labelling a PR under review with anything else cancels nothing.
+concurrency:
+  group: ${{ github.event.label.name == 'agent:review' && format('agent-review-{0}', github.event.pull_request.number) || format('ignore-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.label.name == 'agent:review' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GH_REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      TICKET: ${{ runner.temp }}/review/ticket.md
+      REVIEW_OUT: ${{ runner.temp }}/review.json
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Take the trigger label off
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Removed now, so adding it again is how you retry.
+        run: gh pr edit "$PR_NUMBER" --remove-label "agent:review"
+
+      - name: Checkout the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The reviewer's prompt, code, skill and rules come from the base branch,
+      # so a pull request can't change the review of itself.
+      - name: Checkout the reviewer from the base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .base
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/factory/
+            /.agents/skills/code-review/
+            /CODING_STANDARDS.md
+          persist-credentials: false
+
+      - name: Fetch the ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$TICKET")"
+
+          # The first "Closes #12" (or Fixes/Resolves) in the PR body, as "12".
+          issue=$(gh pr view "$PR_NUMBER" --json body --jq .body \
+            | grep -oiE '(closes|fixes|resolves) #[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)
+
+          if [ -z "$issue" ]; then
+            echo "No ticket: the pull request does not say which issue it closes." > "$TICKET"
+          else
+            gh api "repos/$GH_REPO/issues/$issue" > "$RUNNER_TEMP/issue.json"
+            # Anyone can open an issue on a public repo: only show the agent
+            # one written by someone on the project.
+            case "$(jq -r .author_association "$RUNNER_TEMP/issue.json")" in
+              OWNER | MEMBER | COLLABORATOR)
+                # Write it as "# #12: Title", a blank line, then the body.
+                jq -r '"# #\(.number): \(.title)\n\n\(.body // "")"' "$RUNNER_TEMP/issue.json" > "$TICKET"
+                ;;
+              *)
+                echo "No ticket: #$issue was opened by someone outside the project, so it is not shown." > "$TICKET"
+                ;;
+            esac
+          fi
+          cat "$TICKET"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # For the Next.js docs in node_modules. --ignore-scripts: nothing the
+      # pull request added to package.json runs here.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.332
+
+      - name: Review
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: node .base/.github/factory/review.ts
+
+      - name: Post the review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # One review: the verdict as its body, the findings as line comments.
+        run: |
+          gh api --method POST "repos/$GH_REPO/pulls/$PR_NUMBER/reviews" \
+            --input "$REVIEW_OUT" --silent
+
+      - name: Mark the pull request ready
+        if: github.event.pull_request.draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr ready "$PR_NUMBER"
+
+      - name: Report a failed review
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body \
+            "The review run failed before posting a verdict ([logs]($RUN_URL)). Add \`agent:review\` again to retry."
