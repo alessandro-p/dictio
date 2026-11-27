@@ -35,7 +35,7 @@ export type ReviewOutput = {
 
 // GitHub rejects a whole review if one inline comment is outside the diff, so
 // only lines inside a hunk, on the new side, are commentable.
-export const diffLines = (diff: string): Map<string, Set<number>> => {
+export const commentableLines = (diff: string): Map<string, Set<number>> => {
   const files = new Map<string, Set<number>>();
   let inHeader = false;
   let lines: Set<number> | undefined;
@@ -84,11 +84,11 @@ const listed = (finding: Finding, inline: boolean): string => {
 
 export const renderReview = (
   output: ReviewOutput,
-  hunks: Map<string, Set<number>>,
+  commentable: Map<string, Set<number>>,
   runUrl: string,
 ) => {
   const isInline = ({ path, line }: Finding) =>
-    hunks.get(path)?.has(line) ?? false;
+    commentable.get(path)?.has(line) ?? false;
 
   const section = (axis: Axis, summary: string): string => {
     const findings = output.findings.filter((finding) => finding.axis === axis);
@@ -207,7 +207,11 @@ const main = (): void => {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
-  const review = renderReview(output, diffLines(diff), required("RUN_URL"));
+  const review = renderReview(
+    output,
+    commentableLines(diff),
+    required("RUN_URL"),
+  );
   writeFileSync(
     required("REVIEW_OUT"),
     JSON.stringify({

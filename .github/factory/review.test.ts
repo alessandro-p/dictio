@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffLines, renderReview, type Finding } from "./review";
+import { commentableLines, renderReview, type Finding } from "./review";
 
 const diff = [
   "diff --git a/src/a.ts b/src/a.ts",
@@ -49,28 +49,69 @@ const output = {
   missingRules: [],
 };
 
-describe("diffLines", () => {
+describe("commentableLines", () => {
   it("records added and context lines on the new side", () => {
-    expect([...(diffLines(diff).get("src/a.ts") ?? [])]).toEqual([
+    expect([...(commentableLines(diff).get("src/a.ts") ?? [])]).toEqual([
       1, 2, 3, 10, 11, 12,
     ]);
   });
 
   it("records every line of a new file", () => {
-    expect([...(diffLines(diff).get("src/b.ts") ?? [])]).toEqual([1, 2]);
+    expect([...(commentableLines(diff).get("src/b.ts") ?? [])]).toEqual([1, 2]);
   });
 
   it("records nothing for a deleted file", () => {
-    expect(diffLines(diff).has("src/gone.ts")).toBe(false);
+    expect(commentableLines(diff).has("src/gone.ts")).toBe(false);
+  });
+
+  it("records a renamed file under its new name", () => {
+    const renamed = commentableLines(
+      [
+        "diff --git a/src/old.ts b/src/new.ts",
+        "similarity index 90%",
+        "rename from src/old.ts",
+        "rename to src/new.ts",
+        "index 5555555..6666666 100644",
+        "--- a/src/old.ts",
+        "+++ b/src/new.ts",
+        "@@ -1,2 +1,2 @@",
+        " same",
+        "-before",
+        "+after",
+        "",
+      ].join("\n"),
+    );
+
+    expect([...(renamed.get("src/new.ts") ?? [])]).toEqual([1, 2]);
+    expect(renamed.has("src/old.ts")).toBe(false);
+  });
+
+  it("doesn't count git's no-newline marker as a line", () => {
+    const lines = commentableLines(
+      [
+        "diff --git a/src/c.ts b/src/c.ts",
+        "index 7777777..8888888 100644",
+        "--- a/src/c.ts",
+        "+++ b/src/c.ts",
+        "@@ -1 +1,2 @@",
+        "-last",
+        "\\ No newline at end of file",
+        "+last",
+        "+added",
+        "",
+      ].join("\n"),
+    );
+
+    expect([...(lines.get("src/c.ts") ?? [])]).toEqual([1, 2]);
   });
 });
 
 describe("renderReview", () => {
-  const hunks = diffLines(diff);
+  const commentable = commentableLines(diff);
   const runUrl = "https://example.test/run/1";
 
   it("passes both axes when there are no findings", () => {
-    const { body, comments } = renderReview(output, hunks, runUrl);
+    const { body, comments } = renderReview(output, commentable, runUrl);
 
     expect(body).toContain("## Standards: PASS\n\nFollows the rules.");
     expect(body).toContain("## Spec: PASS\n\nDoes what the ticket asks.");
@@ -84,7 +125,7 @@ describe("renderReview", () => {
   it("requests changes only on the axis with a finding", () => {
     const { body } = renderReview(
       { ...output, findings: [finding({ axis: "spec" })] },
-      hunks,
+      commentable,
       runUrl,
     );
 
@@ -95,7 +136,7 @@ describe("renderReview", () => {
   it("posts a finding inside a hunk on its line, and lists it by title", () => {
     const { body, comments } = renderReview(
       { ...output, findings: [finding({})] },
-      hunks,
+      commentable,
       runUrl,
     );
 
@@ -114,7 +155,7 @@ describe("renderReview", () => {
   it("writes a finding outside the hunks into the verdict in full", () => {
     const { body, comments } = renderReview(
       { ...output, findings: [finding({ line: 5 })] },
-      hunks,
+      commentable,
       runUrl,
     );
 
@@ -130,7 +171,7 @@ describe("renderReview", () => {
         ...output,
         findings: [finding({ title: "One" }), finding({ title: "Two" })],
       },
-      hunks,
+      commentable,
       runUrl,
     );
 
@@ -142,7 +183,7 @@ describe("renderReview", () => {
   it("lists the rules the review could not find", () => {
     const { body } = renderReview(
       { ...output, missingRules: ["No rule on file size.", "Nor on names."] },
-      hunks,
+      commentable,
       runUrl,
     );
 
