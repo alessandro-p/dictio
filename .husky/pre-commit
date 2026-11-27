@@ -1,3 +1,3 @@
-npx lint-staged
-npm run --silent typecheck
-npm run --silent test
+pnpm exec lint-staged
+pnpm --silent typecheck
+pnpm --silent test

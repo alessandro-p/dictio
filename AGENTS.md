@@ -12,10 +12,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Before you report a change as complete, run:
 
-1. `npm run check`: Prettier check, ESLint (zero warnings), typecheck, unit tests
-2. `npm run build`
+1. `pnpm check`: Prettier check, ESLint (zero warnings), typecheck, unit tests
+2. `pnpm build`
 
-Fix formatting with `npm run format`. The pre-commit hook runs the fast checks on
+Fix formatting with `pnpm format`. The pre-commit hook runs the fast checks on
 every commit, and CI runs all of them on every pull request.
 
 Never get to green by weakening a check: no `--no-verify`, no disabled rules or

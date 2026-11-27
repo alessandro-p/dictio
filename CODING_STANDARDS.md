@@ -51,7 +51,7 @@ _Why:_ the `!` turns a compile-time warning back into a runtime crash.
 Build UI from `@/components/ui` (shadcn/ui) and theme tokens such as
 `bg-background`, `text-foreground` and `text-muted-foreground`. Don't hard-code
 colours like `bg-white` or `text-zinc-500`. Add missing components with
-`npx shadcn@latest add <name>` rather than hand-writing them.
+`pnpm dlx shadcn@latest add <name>` rather than hand-writing them.
 
 _Why:_ raw colours break dark mode and drift from the theme one PR at a time.
 
