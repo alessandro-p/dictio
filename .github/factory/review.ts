@@ -154,18 +154,17 @@ const claudeArgs = (schema: string, readDir: string): string[] => [
   "--tools",
   "Read,Glob,Grep,Bash,Agent",
   // Shell commands that run without asking: git commands that read history.
+  // Every other call needs approval, and in print mode nobody can give it, so
+  // it's denied. (No --permission-mode: the env scrub below forces the default.)
+  // https://code.claude.com/docs/en/permissions
   "--allowedTools",
-  "Bash(git diff:*)",
-  "Bash(git log:*)",
-  "Bash(git rev-parse:*)",
-  "Bash(git show:*)",
+  "Bash(git diff *)",
+  "Bash(git log *)",
+  "Bash(git rev-parse *)",
+  "Bash(git show *)",
   // Denied outright, even if a setting allowed them.
   "--disallowedTools",
   "Edit,Write,NotebookEdit",
-  // Deny anything that isn't allowed above instead of waiting for a person.
-  // https://code.claude.com/docs/en/permission-modes
-  "--permission-mode",
-  "dontAsk",
   // One more directory it may read: the one holding the ticket.
   "--add-dir",
   readDir,
