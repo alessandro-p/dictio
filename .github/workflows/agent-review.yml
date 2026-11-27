@@ -131,7 +131,9 @@ jobs:
       - name: Mark the pull request ready
         if: github.event.pull_request.draft
         env:
-          GH_TOKEN: ${{ github.token }}
+          # GITHUB_TOKEN is refused markPullRequestReadyForReview. The PAT is
+          # safe in this job: nothing the pull request wrote runs here.
+          GH_TOKEN: ${{ secrets.FACTORY_PAT }}
         run: gh pr ready "$PR_NUMBER"
 
       - name: Report a failed review
