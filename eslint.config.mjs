@@ -12,7 +12,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Local, gitignored teaching workspace: not part of the app.
     "learn/**",
   ]),
 ]);

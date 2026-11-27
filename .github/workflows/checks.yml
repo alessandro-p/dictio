@@ -1,17 +1,5 @@
 name: Checks
 
-# The factory's first brake, run where nobody's machine can disagree.
-#
-# It runs `npm run check`, the same script a developer or an agent runs
-# locally, and then the production build. To add a check, add it to the
-# `check` script in package.json: CI picks it up without changing this file.
-#
-# SAFE ON A PUBLIC REPO
-#   `pull_request` runs fork PRs without this repo's secrets, and the token
-#   below can only read. Never switch this to `pull_request_target`: that runs
-#   with secrets and a write token, and a fork controls the code it checks out.
-#   https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
-
 on:
   pull_request:
   push:
@@ -20,15 +8,13 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same PR makes the older run pointless.
 concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   checks:
-    # The branch rule on main requires this name. Rename both together.
-    name: checks
+    name: checks # required by the main ruleset
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
