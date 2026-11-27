@@ -64,6 +64,8 @@ const main = (): void => {
     claudeArgs(schema, dirname(ticket)),
     prompt,
   ) as ImplementOutput;
+  // In the log too, so a run that commits nothing still says why.
+  console.log(output.prBody);
   writeFileSync(required("PR_BODY"), output.prBody);
 };
 
