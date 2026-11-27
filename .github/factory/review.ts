@@ -2,20 +2,34 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+// These types mirror review-schema.json, which the agent's answer is validated
+// against. Change one, change the other.
+
 type Axis = "standards" | "spec";
 
+/** One problem the reviewer found. */
 export type Finding = {
+  /** The verdict section it belongs to. */
   axis: Axis;
+  /** The problem in a few words, plain text. */
   title: string;
+  /** The file, relative to the repository root. */
   path: string;
+  /** The line in the file after the change; posted inline when it's in the diff. */
   line: number;
+  /** Markdown: the rule or ticket line it breaks, what is wrong, what to do. */
   body: string;
 };
 
+/** The agent's whole answer. */
 export type ReviewOutput = {
+  /** The Standards axis in one or two sentences. */
   standards: string;
+  /** The Spec axis in one or two sentences, or why there is no spec. */
   spec: string;
+  /** Every finding from both axes. None on an axis means it passes. */
   findings: Finding[];
+  /** What the reviewer wanted to fail the change for, with no standard to cite. */
   missingRules: string[];
 };
 
